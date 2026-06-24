@@ -1,0 +1,46 @@
+-- SentinelStream Database Schema
+-- This file runs automatically when the Postgres Docker container starts
+-- (mounted at /docker-entrypoint-initdb.d/schema.sql)
+
+-- Enable UUID generation (built into Postgres 13+)
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ─── Users ────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS users (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  username      TEXT        UNIQUE NOT NULL,
+  password_hash TEXT        NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ─── Cameras ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS cameras (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT        NOT NULL,
+  rtsp_url   TEXT        NOT NULL,
+  location   TEXT,
+  enabled    BOOLEAN     DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ─── Alerts ───────────────────────────────────────────────────────────────
+-- Stores the unified detection event format.
+-- This same shape is used in: worker POST body, API storage, WebSocket push.
+CREATE TABLE IF NOT EXISTS alerts (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  camera_id     UUID        NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
+  event_type    TEXT        NOT NULL DEFAULT 'person_detected',
+  timestamp     TIMESTAMPTZ NOT NULL,
+  confidence    FLOAT       NOT NULL,
+  bounding_box  JSONB,          -- { x, y, width, height }
+  frame_number  BIGINT,
+  thumbnail_url TEXT,
+  raw_payload   JSONB           -- full original event, useful for debugging
+);
+
+-- ─── Indexes (speeds up common queries) ───────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_cameras_user_id   ON cameras(user_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_camera_id  ON alerts(camera_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_timestamp  ON alerts(timestamp DESC);

@@ -1,0 +1,29 @@
+# MediaMTX configuration — RTSP test stream server
+# Docs: https://github.com/bluenviron/mediamtx
+
+# ─── General ──────────────────────────────────────────────────
+logLevel: info
+
+# ─── Protocols ────────────────────────────────────────────────
+protocols: [tcp]    # Use TCP for reliability inside Docker
+
+# ─── Paths (streams) ──────────────────────────────────────────
+paths:
+  # Stream name: "test"
+  # Access via: rtsp://mediamtx:8554/test   (from inside Docker)
+  #             rtsp://localhost:8554/test  (from your host machine)
+  test:
+    # FFmpeg reads a test video file and loops it as RTSP
+    # The test.mp4 file should be in infra/ folder
+    runOnInit: >
+      ffmpeg
+      -re
+      -stream_loop -1
+      -i /test.mp4
+      -c:v libx264
+      -preset ultrafast
+      -tune zerolatency
+      -c:a aac
+      -f rtsp
+      rtsp://localhost:8554/test
+    runOnInitRestart: yes

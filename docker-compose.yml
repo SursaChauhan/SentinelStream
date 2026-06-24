@@ -1,0 +1,86 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL Database ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinel_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ─── Backend API (Bun + Hono) ────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sentinel_backend
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Backend needs to reach worker
+    # Worker needs to reach backend
+    # Both on the default bridge network — fine for HTTP calls
+
+  # ─── Python Worker ────────────────────────────────────────────────────
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: sentinel_worker
+    env_file: .env
+    ports:
+      - "8001:8001"
+    depends_on:
+      - backend
+    # network_mode: host   ← uncomment if WebRTC ICE fails in Docker
+    #                         (needed for local WebRTC peer discovery)
+
+  # ─── React Frontend ───────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sentinel_frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+  # ─── MediaMTX (RTSP Test Stream Server) ──────────────────────────────
+  # This replaces a real camera. It loops a test video as an RTSP stream.
+  # Access it as:  rtsp://mediamtx:8554/test
+  mediamtx:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: sentinel_mediamtx
+    ports:
+      - "8554:8554"   # RTSP
+      - "8888:8888"   # HLS (optional, for testing in browser)
+    volumes:
+      - ./infra/mediamtx.yml:/mediamtx.yml   # custom config
+      - ./infra/test.mp4:/test.mp4           # test video to loop
+
+  # ─── Redis (Bonus: Message Queue) ─────────────────────────────────────
+  # Uncomment when ready to implement MQ bonus
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: sentinel_redis
+  #   ports:
+  #     - "6379:6379"
+
+volumes:
+  postgres_data:
