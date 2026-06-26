@@ -147,3 +147,10 @@ worker/.venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# MediaMTX binary (platform-specific, download separately)
+infra/mediamtx
+infra/mediamtx.tar.gz
+
+# YOLOv8 model weights (auto-downloaded on first run)
+*.pt

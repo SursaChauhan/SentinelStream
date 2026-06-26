@@ -1,43 +1,71 @@
 # worker/Dockerfile
 #
-# Python worker with OpenCV + YOLOv8 + FastAPI.
+# Python worker with OpenCV + YOLOv8 + FastAPI + aiortc WebRTC.
 #
-# WHY python:3.11-slim (not 3.13)?
-#   Some scientific packages (torch, opencv) don't have pre-built wheels for 3.13 yet.
-#   3.11 has excellent compatibility with all our deps.
+# WHY python:3.11-slim?
+#   Torch/ultralytics have pre-built wheels for 3.11. Using 3.13 inside Docker
+#   would require building many C-extension wheels from source.
 #
-# WHY --no-install-recommends?
-#   Keeps the image smaller by skipping optional packages we don't need.
+# WHY torch installed as a separate RUN layer?
+#   torch + CUDA support packages on linux/arm64 (Apple Silicon Docker) can
+#   total ~1 GB. Separating it as its own layer lets Docker cache the result
+#   so code changes don't re-download a gigabyte of packages.
 #
-# WHY pre-download the YOLOv8 model?
-#   Without this, the first camera start would trigger a ~6MB download
-#   inside the container at runtime. Pre-downloading in the build step
-#   means the model is baked into the image — faster startup, works offline.
+# WHY PIP_DEFAULT_TIMEOUT=600?
+#   Default pip timeout is 15s per read. Large CUDA packages (100-200 MB each)
+#   take far longer on typical connections and will timeout without this.
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies needed by OpenCV
-# libglib2.0-0   — required by OpenCV
-# libgomp1       — required by PyTorch (OpenMP for multi-threading)
-# ffmpeg         — used by OpenCV for RTSP/H264 decoding
+# System deps
+# libglib2.0-0     — required by OpenCV (GLib runtime)
+# libgomp1         — OpenMP multi-threading, required by PyTorch on ARM
+# ffmpeg           — RTSP/H264 decoding via OpenCV
+# libavformat-dev  — needed by PyAV (aiortc dependency)
+# libavcodec-dev   — needed by PyAV
+# libavdevice-dev  — needed by PyAV
+# libavutil-dev    — needed by PyAV
+# libswscale-dev   — needed by PyAV
+# libswresample-dev— needed by PyAV
+# libavfilter-dev  — needed by PyAV
+# pkg-config       — required to build PyAV from source (finds ffmpeg libs)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libgomp1 \
     ffmpeg \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libswscale-dev \
+    libswresample-dev \
+    libavfilter-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-# Separate COPY so Docker caches this layer when only source files change
+# Increase pip read timeout to 10 minutes.
+# CUDA packages are 100–200 MB each — they will hit the default 15s timeout.
+ENV PIP_DEFAULT_TIMEOUT=600
+
+# Install PyTorch as its own cached layer.
+# WHY separate? torch pulls ~1 GB of CUDA/Triton packages on linux/arm64.
+# As a separate layer it's cached after the first successful build, so
+# subsequent rebuilds (when only app code changes) are instant.
+RUN pip install --no-cache-dir \
+    "torch>=2.6.0" \
+    "torchvision>=0.21.0"
+
+# Install remaining dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download the YOLOv8n model weights so we don't need internet at runtime.
-# The model downloads to /root/.cache/ultralytics/
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
+# Pre-download the YOLOv8n model weights so the first camera start is instant.
+# Model is cached in /root/.cache/ultralytics/
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" 2>&1 | tail -3
 
-# Copy source files
+# Copy application source
 COPY . .
 
 EXPOSE 8001
