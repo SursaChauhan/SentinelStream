@@ -154,3 +154,7 @@ infra/mediamtx.tar.gz
 
 # YOLOv8 model weights (auto-downloaded on first run)
 *.pt
+
+# SSL Certificates (local dev)
+*.crt
+*.key

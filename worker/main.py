@@ -37,6 +37,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Load .env manually if running locally outside of Docker
+import os
+for dotenv_path in ["../.env", ".env"]:
+    if os.path.exists(dotenv_path):
+        with open(dotenv_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key] = val.strip()
+
 WORKER_SECRET = os.getenv("WORKER_SECRET", "internal_worker_secret")
 
 # Global manager instance (initialized in lifespan)

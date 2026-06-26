@@ -21,12 +21,22 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Load .env manually if running locally outside of Docker
+for dotenv_path in ["../.env", ".env"]:
+    if os.path.exists(dotenv_path):
+        with open(dotenv_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key] = val.strip()
+
 API_URL       = os.getenv("API_URL", "http://backend:3000")
 WORKER_SECRET = os.getenv("WORKER_SECRET", "internal_worker_secret")
 
 # Minimum seconds between alerts for the same camera
 # Prevents flooding the DB with duplicate detections
-COOLDOWN_SECONDS = float(os.getenv("ALERT_COOLDOWN_SECONDS", "5"))
+COOLDOWN_SECONDS = float(os.getenv("ALERT_COOLDOWN_SECONDS", "15"))
 
 
 class ApiClient:

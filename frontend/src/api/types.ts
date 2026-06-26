@@ -20,7 +20,7 @@ export interface Alert {
   event_type:   string;
   timestamp:    string;
   confidence:   number;
-  bounding_box: { x: number; y: number; width: number; height: number } | null;
+  bounding_box: { x: number; y: number; width: number; height: number; frame_width?: number; frame_height?: number } | null;
   frame_number: number | null;
   created_at:   string;
 }

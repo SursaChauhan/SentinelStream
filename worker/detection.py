@@ -95,6 +95,8 @@ def detect_persons(frame: np.ndarray, confidence_threshold: float = 0.5) -> list
                     "y":      int(y1),
                     "width":  int(x2 - x1),
                     "height": int(y2 - y1),
+                    "frame_width": int(frame.shape[1]),
+                    "frame_height": int(frame.shape[0]),
                 },
                 class_id=cls_id,
                 class_name="person",

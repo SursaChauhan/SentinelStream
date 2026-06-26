@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { Camera, StreamStatus } from "../api/types";
+import type { Alert, Camera, StreamStatus } from "../api/types";
 import { camerasApi } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import VideoPlayer from "./VideoPlayer";
@@ -7,17 +7,39 @@ import VideoPlayer from "./VideoPlayer";
 interface CameraTileProps {
   camera: Camera;
   initialStatus: StreamStatus;
+  latestAlert?: Alert | null;
 }
 
-export default function CameraTile({ camera, initialStatus }: CameraTileProps) {
+export default function CameraTile({ camera, initialStatus, latestAlert }: CameraTileProps) {
   const { token } = useAuth();
   const [status, setStatus] = useState<StreamStatus>(initialStatus);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<{ fps: number; detections_per_min: number } | null>(null);
 
-  // Poll camera stats when stream is live
+  // Synchronize state with initialStatus prop (from parent/WebSocket)
   useEffect(() => {
-    if (status !== "live") {
+    setStatus(initialStatus);
+  }, [initialStatus]);
+
+  // Check initial stream status on mount
+  useEffect(() => {
+    async function checkInitialStatus() {
+      try {
+        const res = await camerasApi.status(camera.id);
+        if (res.stats && res.stats.state) {
+          setStatus(res.stats.state as StreamStatus);
+        }
+      } catch (err) {
+        console.debug("Failed to fetch initial camera status:", err);
+        setStatus("stopped");
+      }
+    }
+    checkInitialStatus();
+  }, [camera.id]);
+
+  // Poll camera stats and connection state when stream is live or connecting
+  useEffect(() => {
+    if (status !== "live" && status !== "connecting") {
       setStats(null);
       return;
     }
@@ -25,17 +47,25 @@ export default function CameraTile({ camera, initialStatus }: CameraTileProps) {
     async function fetchStats() {
       try {
         const res = await camerasApi.status(camera.id);
-        setStats({
-          fps: res.stats.fps,
-          detections_per_min: res.stats.detections_per_min,
-        });
+        if (res.stats) {
+          setStats({
+            fps: res.stats.fps,
+            detections_per_min: res.stats.detections_per_min,
+          });
+          if (res.stats.state && res.stats.state !== status) {
+            setStatus(res.stats.state as StreamStatus);
+          }
+        }
       } catch (err) {
         console.debug("Failed to fetch camera stats:", err);
+        if (status === "live") {
+          setStatus("error");
+        }
       }
     }
 
     fetchStats();
-    const interval = setInterval(fetchStats, 3000);
+    const interval = setInterval(fetchStats, 2000);
 
     return () => clearInterval(interval);
   }, [camera.id, status]);
@@ -76,13 +106,34 @@ export default function CameraTile({ camera, initialStatus }: CameraTileProps) {
             {camera.location && <div className="camera-location">{camera.location}</div>}
           </div>
         </div>
-        <span className={`status-badge status-${status}`}>
-          {status}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <span className={`status-badge status-${status}`}>
+            {status}
+          </span>
+          {status === "live" && (
+            <button
+              onClick={handleStop}
+              disabled={loading}
+              style={{
+                padding: "3px 10px",
+                fontSize: "11px",
+                background: "rgba(244,63,94,0.2)",
+                border: "1px solid rgba(244,63,94,0.6)",
+                borderRadius: "6px",
+                color: "#f43f5e",
+                cursor: "pointer",
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+              }}
+            >
+              ⏹ Stop
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="video-container">
-        <VideoPlayer cameraId={camera.id} status={status} token={token} />
+        <VideoPlayer cameraId={camera.id} status={status} token={token} latestAlert={latestAlert} />
       </div>
 
       <div className="camera-controls">
@@ -102,7 +153,7 @@ export default function CameraTile({ camera, initialStatus }: CameraTileProps) {
               style={{ padding: "6px 12px", fontSize: "12px" }}
               disabled={loading}
             >
-              ⏹️ Stop
+              ⏹️ Stop Stream
             </button>
           ) : (
             <button

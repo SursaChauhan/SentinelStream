@@ -1,21 +1,56 @@
 // frontend/src/components/VideoPlayer.tsx
 import { useEffect, useRef, useState } from "react";
-import type { StreamStatus } from "../api/types";
+import type { Alert, StreamStatus } from "../api/types";
 
 interface VideoPlayerProps {
   cameraId: string;
   status: StreamStatus;
   token: string | null;
+  latestAlert?: Alert | null;
 }
 
-export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const [internalStatus, setInternalStatus] = useState<string>("");
-  const [webrtcError, setWebrtcError] = useState<string | null>(null);
+export default function VideoPlayer({ cameraId, status, token, latestAlert }: VideoPlayerProps) {
+  const videoRef  = useRef<HTMLVideoElement | null>(null);
+  const pcRef     = useRef<RTCPeerConnection | null>(null);
+  const fadeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [internalStatus, setInternalStatus] = useState<string>("");
+  const [webrtcError, setWebrtcError]       = useState<string | null>(null);
+  const [showBox, setShowBox]               = useState(false);
+  const [activeAlert, setActiveAlert]       = useState<Alert | null>(null);
+
+  // Show the bounding box overlay for 10 seconds when a new detection arrives
   useEffect(() => {
-    // If the camera is not live or we don't have auth, clear the peer connection
+    if (!latestAlert?.bounding_box) return;
+    let bb = latestAlert.bounding_box;
+    if (typeof bb === "string") {
+      try {
+        bb = JSON.parse(bb);
+      } catch (err) {
+        console.error("Failed to parse bounding_box string:", err);
+        return;
+      }
+    }
+    if (!bb || !bb.width || !bb.height) return;
+
+    if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    setActiveAlert({
+      ...latestAlert,
+      bounding_box: bb,
+    });
+    setShowBox(true);
+
+    fadeTimer.current = setTimeout(() => {
+      setShowBox(false);
+    }, 10000);
+
+    return () => {
+      if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    };
+  }, [latestAlert]);
+
+  // WebRTC connection lifecycle
+  useEffect(() => {
     if (status !== "live" || !token) {
       cleanup();
       setInternalStatus("");
@@ -28,53 +63,44 @@ export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProp
         setInternalStatus("Negotiating WebRTC...");
         setWebrtcError(null);
 
-        // 1. Create peer connection
         const pc = new RTCPeerConnection({
           iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
         });
         pcRef.current = pc;
 
-        // 2. Track connection state
         pc.onconnectionstatechange = () => {
-          console.log(`WebRTC State: ${pc.connectionState}`);
           setInternalStatus(`WebRTC: ${pc.connectionState}`);
           if (pc.connectionState === "failed") {
-            setWebrtcError("WebRTC Connection Failed. Check server logs.");
+            setWebrtcError("WebRTC connection failed. Check server logs.");
           }
         };
 
-        // 3. Receive remote stream track
         pc.ontrack = (event) => {
-          console.log("WebRTC track received ✅");
           if (videoRef.current && event.streams[0]) {
             videoRef.current.srcObject = event.streams[0];
           }
         };
 
-        // WebRTC requires a video track or transceiver to start negotiation
         pc.addTransceiver("video", { direction: "recvonly" });
 
-        // 4. Create local offer
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
-        // Wait for ICE gathering to complete so localDescription includes all ICE candidates
         setInternalStatus("Gathering ICE candidates...");
         await new Promise<void>((resolve) => {
           if (pc.iceGatheringState === "complete") {
             resolve();
           } else {
-            const checkState = () => {
+            const check = () => {
               if (pc.iceGatheringState === "complete") {
-                pc.removeEventListener("icegatheringstatechange", checkState);
+                pc.removeEventListener("icegatheringstatechange", check);
                 resolve();
               }
             };
-            pc.addEventListener("icegatheringstatechange", checkState);
+            pc.addEventListener("icegatheringstatechange", check);
           }
         });
 
-        // 5. Send offer to backend
         setInternalStatus("Sending SDP offer...");
         const response = await fetch(`/api/webrtc/${cameraId}/offer`, {
           method: "POST",
@@ -85,22 +111,14 @@ export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProp
           body: JSON.stringify({ sdp: pc.localDescription?.sdp, type: pc.localDescription?.type }),
         });
 
-        if (!response.ok) {
-          throw new Error(`Offer failed: ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`Offer failed: ${response.statusText}`);
 
         const data = await response.json();
-        if (!data.sdp) {
-          throw new Error("Invalid SDP answer received from server");
-        }
+        if (!data.sdp) throw new Error("Invalid SDP answer received from server");
 
-        // 6. Set remote description (SDP Answer)
         setInternalStatus("Setting remote description...");
-        await pc.setRemoteDescription(
-          new RTCSessionDescription({ type: "answer", sdp: data.sdp })
-        );
-
-        setInternalStatus("Connected to stream");
+        await pc.setRemoteDescription(new RTCSessionDescription({ type: "answer", sdp: data.sdp }));
+        setInternalStatus("WebRTC: connected");
       } catch (err) {
         console.error("WebRTC Setup Error:", err);
         setWebrtcError(err instanceof Error ? err.message : "WebRTC error");
@@ -109,20 +127,17 @@ export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProp
     }
 
     startWebRTC();
-
-    return () => {
-      cleanup();
-    };
+    return () => { cleanup(); };
   }, [cameraId, status, token]);
 
   function cleanup() {
+    if (fadeTimer.current) clearTimeout(fadeTimer.current);
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setShowBox(false);
   }
 
   if (status === "idle" || status === "stopped") {
@@ -130,7 +145,7 @@ export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProp
       <div className="video-placeholder">
         <span style={{ fontSize: "32px" }}>💤</span>
         <span>Stream is offline</span>
-        <span style={{ fontSize: "12px", opacity: 0.6 }}>Click Start in the controls below</span>
+        <span style={{ fontSize: "12px", opacity: 0.6 }}>Click Live Feed to start</span>
       </div>
     );
   }
@@ -138,7 +153,7 @@ export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProp
   if (status === "connecting") {
     return (
       <div className="video-placeholder">
-        <span className="brand-icon" style={{ animation: "spin 2s linear infinite" }}>🔄</span>
+        <span style={{ animation: "spin 2s linear infinite" }}>🔄</span>
         <span>Connecting to camera...</span>
       </div>
     );
@@ -154,6 +169,8 @@ export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProp
     );
   }
 
+
+
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
       <video
@@ -162,9 +179,10 @@ export default function VideoPlayer({ cameraId, status, token }: VideoPlayerProp
         autoPlay
         playsInline
         muted
+        style={{ width: "100%", height: "100%", display: "block" }}
       />
 
-      {/* Floating status & error messages */}
+      {/* Connection status badge */}
       <div className="video-overlay" style={{ left: "12px", right: "auto" }}>
         <div
           className="overlay-stat"

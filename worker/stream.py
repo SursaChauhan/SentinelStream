@@ -80,6 +80,8 @@ class CameraStream:
         self._webrtc_tracks = []
         self._tracks_lock = threading.Lock()
         self._pcs = set()
+        self._current_detections = []
+        self._last_detection_time = 0.0
 
     def add_webrtc_track(self, track):
         with self._tracks_lock:
@@ -168,14 +170,13 @@ class CameraStream:
                     logger.warning(f"Camera {self.camera_id}: frame read failed, reconnecting...")
                     break  # exit inner loop → reconnect
 
+                # Mirror horizontally by default (useful for webcams)
+                if os.getenv("MIRROR_CAMERA", "true").lower() == "true":
+                    frame = cv2.flip(frame, 1)
+
                 frame_count += 1
                 fps_frame_count += 1
                 self.stats.frames_processed = frame_count
-
-                # Push frame to active WebRTC tracks
-                with self._tracks_lock:
-                    for track in list(self._webrtc_tracks):
-                        track.put_frame(frame)
 
                 # --- FPS calculation (every second) ---
                 elapsed = time.monotonic() - fps_timer_start
@@ -185,34 +186,56 @@ class CameraStream:
                     fps_timer_start = time.monotonic()
 
                 # --- Detection (every N frames to manage CPU) ---
-                if frame_count % DETECT_EVERY_N_FRAMES != 0:
-                    continue
+                if frame_count % DETECT_EVERY_N_FRAMES == 0:
+                    detections = detect_persons(frame, confidence_threshold=0.75)
+                    self._current_detections = detections
+                    self._last_detection_time = time.monotonic()
 
-                detections = detect_persons(frame)
+                    if detections:
+                        self.stats.detections_total += len(detections)
+                        detection_times.append(time.monotonic())
 
-                if detections:
-                    self.stats.detections_total += len(detections)
-                    detection_times.append(time.monotonic())
+                        # Keep only detections within the last 60 seconds (for per-min stats)
+                        cutoff = time.monotonic() - 60
+                        detection_times = [t for t in detection_times if t > cutoff]
+                        self.stats.detections_per_min = round(len(detection_times), 1)
 
-                    # Keep only detections within the last 60 seconds (for per-min stats)
-                    cutoff = time.monotonic() - 60
-                    detection_times = [t for t in detection_times if t > cutoff]
-                    self.stats.detections_per_min = round(len(detection_times), 1)
+                        # Post each person detection as an alert
+                        for det in detections:
+                            # Schedule async coroutine from this sync thread
+                            asyncio.run_coroutine_threadsafe(
+                                api_client.post_alert(
+                                    camera_id    = self.camera_id,
+                                    confidence   = det.confidence,
+                                    bounding_box = det.bounding_box,
+                                    frame_number = frame_count,
+                                ),
+                                self._loop,
+                            )
+                            # Only post one alert per detection batch (cooldown handles dedup)
+                            break
 
-                    # Post each person detection as an alert
-                    for det in detections:
-                        # Schedule async coroutine from this sync thread
-                        asyncio.run_coroutine_threadsafe(
-                            api_client.post_alert(
-                                camera_id    = self.camera_id,
-                                confidence   = det.confidence,
-                                bounding_box = det.bounding_box,
-                                frame_number = frame_count,
-                            ),
-                            self._loop,
-                        )
-                        # Only post one alert per detection batch (cooldown handles dedup)
-                        break
+                # --- Draw active bounding boxes on the frame directly in Python ---
+                if self._current_detections and (time.monotonic() - self._last_detection_time < 0.5):
+                    for det in self._current_detections:
+                        bb = det.bounding_box
+                        x, y, w, h = bb["x"], bb["y"], bb["width"], bb["height"]
+                        conf = int(det.confidence * 100)
+
+                        # Draw green bounding box rectangle
+                        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 136), 2)
+
+                        # Draw label text and background rectangle
+                        label = f"PERSON {conf}%"
+                        (label_w, label_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                        label_y = max(y - 5, label_h + 5)
+                        cv2.rectangle(frame, (x, label_y - label_h - 5), (x + label_w, label_y + baseline - 5), (0, 255, 136), cv2.FILLED)
+                        cv2.putText(frame, label, (x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+
+                # Push the annotated frame to active WebRTC tracks
+                with self._tracks_lock:
+                    for track in list(self._webrtc_tracks):
+                        track.put_frame(frame)
 
             cap.release()
 

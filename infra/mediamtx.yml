@@ -27,3 +27,14 @@ paths:
       -f rtsp
       rtsp://localhost:8554/test
     runOnInitRestart: yes
+
+  # Stream name: "webcam"
+  # Push from host with ffmpeg: rtsp://localhost:8554/webcam
+  # Read from Docker services:  rtsp://mediamtx:8554/webcam
+  webcam:
+    source: publisher
+
+  # Wildcard — allow any other path to be published dynamically
+  # Needed for cameras added via the UI with custom stream names
+  ~.*:
+    source: publisher

@@ -12,6 +12,7 @@ export default function DashboardPage() {
   const [cameras, setCameras] = useState<Camera[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [cameraStatuses, setCameraStatuses] = useState<Record<string, StreamStatus>>({});
+  const [latestAlerts, setLatestAlerts] = useState<Record<string, Alert>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,7 +21,9 @@ export default function DashboardPage() {
     console.log("WebSocket Message Received:", msg);
     if (msg.type === "alert") {
       const alertPayload = msg.payload as Alert;
-      setAlerts((prev) => [alertPayload, ...prev].slice(0, 100)); // Limit to last 100 alerts in state
+      setAlerts((prev) => [alertPayload, ...prev].slice(0, 100));
+      // Track latest alert per camera for bounding box overlay
+      setLatestAlerts((prev) => ({ ...prev, [alertPayload.camera_id]: alertPayload }));
     } else if (msg.type === "stream_status") {
       const statusPayload = msg.payload as { camera_id: string; status: StreamStatus };
       if (statusPayload && statusPayload.camera_id) {
@@ -116,6 +119,7 @@ export default function DashboardPage() {
                   key={camera.id}
                   camera={camera}
                   initialStatus={cameraStatuses[camera.id] || "stopped"}
+                  latestAlert={latestAlerts[camera.id] ?? null}
                 />
               ))}
             </div>
