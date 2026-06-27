@@ -346,11 +346,107 @@ body {
 
 .cameras-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); /* Capped at 280px for standard 2-col on laptops */
   gap: 20px;
   overflow-y: auto;
   flex-grow: 1;
   padding-right: 4px;
+  align-items: start; /* Prevent cards from stretching vertically to fill the grid height */
+}
+
+.cameras-grid.cols-1 {
+  grid-template-columns: 1fr;
+}
+
+.cameras-grid.cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.cameras-grid.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.cameras-grid.cols-adaptive {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+/* Layout Segmented Control */
+.layout-selector {
+  display: flex;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.layout-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.layout-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.layout-btn.active {
+  background: var(--accent-rose);
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(244, 63, 94, 0.3);
+}
+
+.alert-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px; /* Fixed height to prevent scrollbar hiding height squish */
+  padding: 0 16px; /* Horizontal padding only */
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 12px;
+  scrollbar-width: none;
+  flex-shrink: 0; /* Prevent the container from being squished by flex list */
+}
+
+.alert-filters::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 0 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.filter-pill:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.filter-pill.active {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--accent-rose);
+  border-color: rgba(244, 63, 94, 0.4);
 }
 
 /* Camera Tile */
@@ -362,14 +458,45 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  aspect-ratio: 16/11;
   position: relative;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  height: auto;
 }
 
 .camera-tile:hover {
   transform: translateY(-2px);
   box-shadow: var(--glass-shadow);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.camera-tile.highlighted {
+  border-color: var(--accent-rose);
+  box-shadow: 0 0 15px rgba(244, 63, 94, 0.45);
+  transform: translateY(-4px) scale(1.008);
+}
+
+/* Warning Badges */
+.tile-badge {
+  background-color: var(--accent-rose);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  box-shadow: 0 2px 4px rgba(244, 63, 94, 0.4);
+  animation: pulse-badge 1.5s infinite alternate;
+  margin-left: 6px;
+}
+
+@keyframes pulse-badge {
+  0% { transform: scale(1.0); }
+  100% { transform: scale(1.12); }
 }
 
 .camera-header {
@@ -412,12 +539,14 @@ body {
 .status-error { background-color: rgba(244, 63, 94, 0.15); color: var(--accent-rose); border: 1px solid rgba(244, 63, 94, 0.3); }
 
 .video-container {
-  flex-grow: 1;
+  width: 100%;
+  aspect-ratio: 16/9;
   background-color: #000;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .video-player {
@@ -505,6 +634,7 @@ body {
   transition: all 0.2s ease;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .alert-item.unread::before {

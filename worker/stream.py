@@ -57,6 +57,7 @@ class StreamStats:
     frames_processed:   int   = 0
     detections_total:   int   = 0
     detections_per_min: float = 0.0
+    current_count:      int   = 0
     state:              StreamState = StreamState.IDLE
     error:              Optional[str] = None
 
@@ -101,6 +102,13 @@ class CameraStream:
             logger.warning(f"Camera {self.camera_id} is already running")
             return
 
+        self._stop_event.set()
+        self.stats.state = StreamState.IDLE
+        self.stats.current_count = 0
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            logger.info(f"Camera stream thread joined for camera: {self.camera_id}")
+        
         self._stop_event.clear()
         self.stats.state = StreamState.CONNECTING
 
@@ -127,6 +135,7 @@ class CameraStream:
             self._webrtc_tracks.clear()
 
         self.stats.state = StreamState.STOPPED
+        self.stats.current_count = 0
         logger.info(f"Camera {self.camera_id} stopped")
 
     def _run(self):
@@ -190,6 +199,7 @@ class CameraStream:
                     detections = detect_persons(frame, confidence_threshold=0.75)
                     self._current_detections = detections
                     self._last_detection_time = time.monotonic()
+                    self.stats.current_count = len(detections)
 
                     if detections:
                         self.stats.detections_total += len(detections)

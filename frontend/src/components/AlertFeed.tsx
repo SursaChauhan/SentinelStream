@@ -4,9 +4,20 @@ import type { Alert, Camera } from "../api/types";
 interface AlertFeedProps {
   alerts: Alert[];
   cameras: Camera[];
+  selectedCameraId: string | null;
+  onSelectCamera: (cameraId: string | null) => void;
+  onHoverCamera: (cameraId: string | null) => void;
+  onLeaveCamera: () => void;
 }
 
-export default function AlertFeed({ alerts, cameras }: AlertFeedProps) {
+export default function AlertFeed({
+  alerts,
+  cameras,
+  selectedCameraId,
+  onSelectCamera,
+  onHoverCamera,
+  onLeaveCamera,
+}: AlertFeedProps) {
   const cameraMap = new Map(cameras.map(c => [c.id, c.name]));
 
   function formatTime(timestamp: string) {
@@ -17,6 +28,11 @@ export default function AlertFeed({ alerts, cameras }: AlertFeedProps) {
       return timestamp;
     }
   }
+
+  // Filter alerts based on active selection
+  const filteredAlerts = selectedCameraId
+    ? alerts.filter((alert) => alert.camera_id === selectedCameraId)
+    : alerts;
 
   return (
     <div className="alerts-section">
@@ -35,21 +51,50 @@ export default function AlertFeed({ alerts, cameras }: AlertFeedProps) {
         </span>
       </div>
 
+      {/* Filter Pills */}
+      {cameras.length > 0 && (
+        <div className="alert-filters">
+          <button
+            className={`filter-pill ${selectedCameraId === null ? "active" : ""}`}
+            onClick={() => onSelectCamera(null)}
+          >
+            All Cameras
+          </button>
+          {cameras.map((camera) => (
+            <button
+              key={camera.id}
+              className={`filter-pill ${selectedCameraId === camera.id ? "active" : ""}`}
+              onClick={() => onSelectCamera(camera.id)}
+            >
+              {camera.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="alerts-list">
-        {alerts.length === 0 ? (
+        {filteredAlerts.length === 0 ? (
           <div style={{
             textAlign: "center",
             padding: "40px 20px",
             color: "var(--text-muted)",
             fontSize: "13px"
           }}>
-            No security events detected. Watching streams...
+            {selectedCameraId 
+              ? "No security events detected for this camera."
+              : "No security events detected. Watching streams..."}
           </div>
         ) : (
-          alerts.map((alert) => {
+          filteredAlerts.map((alert) => {
             const cameraName = cameraMap.get(alert.camera_id) || "Unknown Camera";
             return (
-              <div key={alert.id} className="alert-item unread">
+              <div
+                key={alert.id}
+                className="alert-item unread"
+                onMouseEnter={() => onHoverCamera(alert.camera_id)}
+                onMouseLeave={onLeaveCamera}
+                style={{ transition: "border-color 0.2s ease, background 0.2s ease" }}
+              >
                 <div className="alert-meta">
                   <span className="alert-camera">🚨 {cameraName}</span>
                   <span className="alert-time">{formatTime(alert.timestamp)}</span>

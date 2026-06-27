@@ -92,6 +92,7 @@ export const camerasApi = {
         frames_processed: number;
         detections_total: number;
         detections_per_min: number;
+        current_count: number;
         state: string;
         error: string | null;
       };

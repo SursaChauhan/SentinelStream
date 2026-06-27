@@ -8,13 +8,23 @@ interface CameraTileProps {
   camera: Camera;
   initialStatus: StreamStatus;
   latestAlert?: Alert | null;
+  isHighlighted?: boolean;
+  unreadCount?: number;
+  onFocus?: () => void;
 }
 
-export default function CameraTile({ camera, initialStatus, latestAlert }: CameraTileProps) {
+export default function CameraTile({
+  camera,
+  initialStatus,
+  latestAlert,
+  isHighlighted = false,
+  unreadCount = 0,
+  onFocus,
+}: CameraTileProps) {
   const { token } = useAuth();
   const [status, setStatus] = useState<StreamStatus>(initialStatus);
   const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState<{ fps: number; detections_per_min: number } | null>(null);
+  const [stats, setStats] = useState<{ fps: number; detections_per_min: number; current_count?: number } | null>(null);
 
   // Synchronize state with initialStatus prop (from parent/WebSocket)
   useEffect(() => {
@@ -51,6 +61,7 @@ export default function CameraTile({ camera, initialStatus, latestAlert }: Camer
           setStats({
             fps: res.stats.fps,
             detections_per_min: res.stats.detections_per_min,
+            current_count: res.stats.current_count,
           });
           if (res.stats.state && res.stats.state !== status) {
             setStatus(res.stats.state as StreamStatus);
@@ -96,8 +107,19 @@ export default function CameraTile({ camera, initialStatus, latestAlert }: Camer
     }
   }
 
+  const handleTileClick = (e: React.MouseEvent) => {
+    // Prevent focus filter if the user clicked one of the operational control buttons
+    if ((e.target as HTMLElement).closest("button")) {
+      return;
+    }
+    onFocus?.();
+  };
+
   return (
-    <div className="camera-tile">
+    <div 
+      className={`camera-tile ${isHighlighted ? "highlighted" : ""}`}
+      onClick={handleTileClick}
+    >
       <div className="camera-header">
         <div className="camera-title-group">
           <span style={{ fontSize: "16px" }}>🎥</span>
@@ -106,7 +128,12 @@ export default function CameraTile({ camera, initialStatus, latestAlert }: Camer
             {camera.location && <div className="camera-location">{camera.location}</div>}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          {status === "live" && stats && stats.current_count !== undefined && stats.current_count > 0 && (
+            <span className="tile-badge" style={{ backgroundColor: "var(--accent-rose)" }}>
+              👥 {stats.current_count}
+            </span>
+          )}
           <span className={`status-badge status-${status}`}>
             {status}
           </span>

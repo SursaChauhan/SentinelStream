@@ -179,7 +179,13 @@ export default function VideoPlayer({ cameraId, status, token, latestAlert }: Vi
         autoPlay
         playsInline
         muted
-        style={{ width: "100%", height: "100%", display: "block" }}
+        style={{
+          width: "100%",
+          height: "100%",
+          display: "block",
+          objectFit: "contain",
+          objectPosition: "center",
+        }}
       />
 
       {/* Connection status badge */}

@@ -16,6 +16,12 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Layout & Filter UX States
+  const [gridSize, setGridSize] = useState<"adaptive" | "1" | "2" | "3">("adaptive");
+  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const [hoveredCameraId, setHoveredCameraId] = useState<string | null>(null);
+  const [unreadAlertCounts, setUnreadAlertCounts] = useState<Record<string, number>>({});
+
   // Handle incoming WebSocket messages
   const handleWsMessage = useCallback((msg: WsMessage) => {
     console.log("WebSocket Message Received:", msg);
@@ -24,6 +30,17 @@ export default function DashboardPage() {
       setAlerts((prev) => [alertPayload, ...prev].slice(0, 100));
       // Track latest alert per camera for bounding box overlay
       setLatestAlerts((prev) => ({ ...prev, [alertPayload.camera_id]: alertPayload }));
+
+      // Increment unread count if the user is not currently viewing only this camera's timeline
+      setSelectedCameraId((currentSelected) => {
+        if (currentSelected !== alertPayload.camera_id) {
+          setUnreadAlertCounts((prev) => ({
+            ...prev,
+            [alertPayload.camera_id]: (prev[alertPayload.camera_id] || 0) + 1,
+          }));
+        }
+        return currentSelected;
+      });
     } else if (msg.type === "stream_status") {
       const statusPayload = msg.payload as { camera_id: string; status: StreamStatus };
       if (statusPayload && statusPayload.camera_id) {
@@ -71,6 +88,21 @@ export default function DashboardPage() {
     initDashboard();
   }, []);
 
+  // Handlers for dynamic actions
+  const handleSelectCamera = useCallback((cameraId: string | null) => {
+    setSelectedCameraId(cameraId);
+    if (cameraId) {
+      // Clear alert counter when selecting/focusing camera filter
+      setUnreadAlertCounts((prev) => ({ ...prev, [cameraId]: 0 }));
+    }
+  }, []);
+
+  const handleFocusCamera = useCallback((cameraId: string) => {
+    // Toggle: if clicked again, reset filter to All. Otherwise, set filter.
+    setSelectedCameraId((prev) => (prev === cameraId ? null : cameraId));
+    setUnreadAlertCounts((prev) => ({ ...prev, [cameraId]: 0 }));
+  }, []);
+
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: "80px", color: "var(--text-secondary)" }}>
@@ -92,6 +124,40 @@ export default function DashboardPage() {
             Real-time feed ingestion & YOLOv8-powered person detection.
           </p>
         </div>
+
+        {/* Layout Preset Controls */}
+        {cameras.length > 0 && (
+          <div className="layout-selector">
+            <button
+              className={`layout-btn ${gridSize === "adaptive" ? "active" : ""}`}
+              onClick={() => setGridSize("adaptive")}
+              title="Automatic responsive grid columns"
+            >
+              Auto-Grid
+            </button>
+            <button
+              className={`layout-btn ${gridSize === "1" ? "active" : ""}`}
+              onClick={() => setGridSize("1")}
+              title="1x1 single camera focus"
+            >
+              1x1 Detail
+            </button>
+            <button
+              className={`layout-btn ${gridSize === "2" ? "active" : ""}`}
+              onClick={() => setGridSize("2")}
+              title="2x2 grid view"
+            >
+              2x2 Grid
+            </button>
+            <button
+              className={`layout-btn ${gridSize === "3" ? "active" : ""}`}
+              onClick={() => setGridSize("3")}
+              title="3x3 high-density grid view"
+            >
+              3x3 Grid
+            </button>
+          </div>
+        )}
       </div>
 
       {cameras.length === 0 ? (
@@ -113,20 +179,30 @@ export default function DashboardPage() {
         <div className="dashboard-grid">
           {/* Cameras Grid */}
           <div className="video-section">
-            <div className="cameras-grid">
+            <div className={`cameras-grid cols-${gridSize}`}>
               {cameras.map((camera) => (
                 <CameraTile
                   key={camera.id}
                   camera={camera}
                   initialStatus={cameraStatuses[camera.id] || "stopped"}
                   latestAlert={latestAlerts[camera.id] ?? null}
+                  isHighlighted={hoveredCameraId === camera.id}
+                  unreadCount={unreadAlertCounts[camera.id] || 0}
+                  onFocus={() => handleFocusCamera(camera.id)}
                 />
               ))}
             </div>
           </div>
 
           {/* Live Alert Feed */}
-          <AlertFeed alerts={alerts} cameras={cameras} />
+          <AlertFeed
+            alerts={alerts}
+            cameras={cameras}
+            selectedCameraId={selectedCameraId}
+            onSelectCamera={handleSelectCamera}
+            onHoverCamera={setHoveredCameraId}
+            onLeaveCamera={() => setHoveredCameraId(null)}
+          />
         </div>
       )}
     </div>
