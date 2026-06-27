@@ -96,41 +96,118 @@ This JSON event payload format is preserved identically across the Python worker
 
 ## 🚀 How to Run
 
-### Prerequisites
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/) (must be running)
-* [FFmpeg](https://ffmpeg.org/) (optional, for streaming local webcam)
+### ⚙️ Environment Configuration
+Before launching the services, you must configure the environment variables:
+1. Copy the `.env.example` file to create a `.env` file at the repository root:
+   ```bash
+   cp .env.example .env
+   ```
+2. Open `.env` and verify/configure the database credentials, ports, and internal worker secrets if needed. The default values are tuned to work out of the box with Docker Compose.
 
-### Run the Docker Services
-1. Build and launch all containers in the background:
+---
+
+### 🐳 Option A: Run Everything via Docker Compose (Recommended)
+This launches all five dockerized services (Postgres, Redis, MediaMTX, Backend, Worker, Frontend) automatically:
+1. Make sure **Docker Desktop** is running.
+2. Build and launch the containers:
    ```bash
    docker compose up -d --build
    ```
-   *(Subsequent starts can omit `--build` and start instantly using `docker compose up -d`).*
-2. Open your browser and navigate to:
+   *(Subsequent runs can omit `--build` and start instantly with `docker compose up -d`).*
+3. Open your browser and navigate to:
    ```
    http://localhost:5173
    ```
-3. Sign up an account and log in.
+4. Sign up a test account, log in, and view the simulated live feed!
 
-### Run Local Webcam Stream (macOS / Host)
-If you want to stream your own webcam as a live RTSP stream:
-1. Stop the worker container (so we can run the worker on the host to access camera devices):
+---
+
+### 💻 Option B: Local Development Setup (Outside Docker)
+For active development, running frontend, backend, and worker directly on the host enables fast hot-reloads and debugging.
+
+#### 1. Start Postgres & Redis (via Docker Compose)
+If you don't want to install Postgres and Redis servers locally, spin up just these infrastructure services:
+```bash
+docker compose up -d postgres redis mediamtx
+```
+
+#### 2. Initialize the Database Schema
+If running the Postgres service locally or outside of its initial container run, initialize the tables by executing the schema SQL script:
+```bash
+# If using the Docker Postgres service:
+docker exec -i sentinel_postgres psql -U your_db_user -d your_db_name < backend/src/db/schema.sql
+
+# If using a local Postgres installation:
+psql -U your_db_user -d your_db_name -f backend/src/db/schema.sql
+```
+
+#### 3. Run the Backend API
+1. Navigate to the backend folder:
+   ```bash
+   cd backend
+   ```
+2. Install dependencies:
+   ```bash
+   bun install
+   ```
+3. Run the backend in development (watch) mode:
+   ```bash
+   bun run dev
+   ```
+   The backend API will start on `http://localhost:3000`.
+
+#### 4. Run the Frontend Dashboard
+1. Navigate to the frontend folder:
+   ```bash
+   cd frontend
+   ```
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Run the Vite development server:
+   ```bash
+   npm run dev
+   ```
+   The frontend UI will start on `http://localhost:5173`.
+
+#### 5. Run the Python Worker
+1. Navigate to the worker folder:
+   ```bash
+   cd worker
+   ```
+2. Create and activate a Python virtual environment:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   pip install "torch>=2.6.0" "torchvision>=0.21.0"
+   ```
+4. Run the FastAPI worker server:
+   ```bash
+   uvicorn main:app --host 0.0.0.0 --port 8001
+   ```
+
+---
+
+### 📷 Run Local Webcam Stream (macOS / Host)
+If you want to stream your own webcam as a live RTSP stream instead of the loop video:
+1. Stop the worker container (if running via Docker):
    ```bash
    docker stop sentinel_worker
    ```
-2. Launch the worker locally:
-   ```bash
-   cd worker
-   .venv/bin/uvicorn main:app --host 0.0.0.0 --port 8001
-   ```
-3. Publish your webcam stream to MediaMTX using `ffmpeg` (in a separate shell):
+2. Run the worker locally (following the steps in **Local Development Setup** above).
+3. Publish your webcam feed to MediaMTX using `ffmpeg`:
    ```bash
    ffmpeg -f avfoundation -framerate 30 -video_size 640x480 -i "0" \
      -pix_fmt yuv420p -vf "format=yuv420p" \
      -c:v libx264 -preset ultrafast -tune zerolatency \
      -f rtsp rtsp://localhost:8554/webcam
    ```
-4. Register the camera in **Camera Manager** with the RTSP URL `rtsp://localhost:8554/webcam`, go back to the **Dashboard**, and click **▶️ Live Feed**!
+4. In the browser UI (Camera Manager), add a camera with the RTSP URL `rtsp://localhost:8554/webcam`.
 
 ---
 
@@ -145,12 +222,34 @@ bun run test
 ---
 
 ## ☸️ Kubernetes Deployment
-Production-grade deployment configuration files are structured under `infra/k8s/`:
-* `namespace.yaml`: Dedicated `sentinelstream` namespace.
-* `postgres.yaml`: Configures Secrets, PersistentVolumeClaim, Deployment, and Service.
-* `redis.yaml`: Redis cache deployment and service.
-* `mediamtx.yaml`: NodePorts to ingest/stream media.
-* `backend.yaml` / `worker.yaml`: API and worker cluster setup.
+
+Production-grade deployment configuration files are structured under `infra/k8s/`.
+
+### Deployment Steps
+To deploy the SentinelStream stack onto a running Kubernetes cluster (e.g. Minikube, Docker Desktop K8s, or GKE):
+
+1. Create the dedicated `sentinelstream` namespace:
+   ```bash
+   kubectl apply -f infra/k8s/namespace.yaml
+   ```
+2. Deploy the database and message broker:
+   ```bash
+   kubectl apply -f infra/k8s/postgres.yaml
+   kubectl apply -f infra/k8s/redis.yaml
+   ```
+3. Deploy the MediaMTX simulator and wait for it to be ready:
+   ```bash
+   kubectl apply -f infra/k8s/mediamtx.yaml
+   ```
+4. Deploy the backend API and detection worker:
+   ```bash
+   kubectl apply -f infra/k8s/backend.yaml
+   kubectl apply -f infra/k8s/worker.yaml
+   ```
+5. Verify that all components are running:
+   ```bash
+   kubectl get pods -n sentinelstream
+   ```
 
 ---
 
