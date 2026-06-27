@@ -1,84 +1,161 @@
 # SentinelStream
 
-SentinelStream is a real-time Video Management System (VMS) with AI-powered person detection. It uses a modern event-driven architecture, streaming video to browsers with low-latency **WebRTC** and relaying metadata via **WebSockets**.
+SentinelStream is a real-time Video Management System (VMS) with AI-powered person detection. It uses a modern event-driven architecture, streaming live video to browsers over low-latency **WebRTC**, publishing detection events via **Redis Pub/Sub (Message Queue)**, and broadcasting updates to browser clients via **WebSockets**.
 
 ---
 
 ## 🏗️ Architecture Overview
 
-The system consists of four isolated services orchestrated by Docker Compose:
+The system consists of five dockerized services orchestrated by Docker Compose:
 
 ```
-                  ┌──────────────────────────────────────────────┐
-                  │                Browser (React)               │
-                  │   ┌───────────────┐      ┌───────────────┐   │
-                  │   │  Live Video   │      │  Alert Feed   │   │
-                  │   └───────▲───────┘      └───────▲───────┘   │
-                  └───────────┼──────────────────────┼───────────┘
-                    WebRTC    │                      │ WebSocket
-                (Media Stream)│                      │ (Metadata)
-                              │                      │
-                      ┌───────┴──────┐        ┌──────┴───────┐
-                      │    Worker    │        │   Backend    │
-                      │   (Python)   ├───────►│ (Bun + Hono) │
-                      └───────▲──────┘  HTTP  └──────▲───────┘
-                        RTSP  │                      │ PostgreSQL
-                              │                      │ (Persistent Store)
-                      ┌───────┴──────┐        ┌──────┴───────┐
-                      │   MediaMTX   │        │  PostgreSQL  │
-                      │ (Simulator)  │        │   Database   │
-                      └──────────────┘        └──────────────┘
+                   ┌──────────────────────────────────────────────┐
+                   │                Browser (React)               │
+                   │   ┌───────────────┐      ┌───────────────┐   │
+                   │   │  Live Video   │      │  Alert Feed   │   │
+                   │   └───────▲───────┘      └───────▲───────┘   │
+                   └───────────┼──────────────────────┼───────────┘
+                     WebRTC    │                      │ WebSocket
+                 (Media Stream)│                      │ (Metadata)
+                               │                      │
+                       ┌───────┴──────┐        ┌──────┴───────┐
+                       │    Worker    │        │   Backend    │
+                       │   (Python)   │        │ (Bun + Hono) │
+                       └───────┬──────┘        └──────▲───┬───┘
+                               │                      │   │
+                               │ Redis MQ             │   │
+                               ▼                      │   │
+                       ┌──────────────┐               │   │
+                       │    Redis     ├───────────────┘   │
+                       │  (Pub/Sub)   │                   │ PostgreSQL
+                       └──────────────┘                   │
+                                                          ▼
+                                                   ┌──────────────┐
+                                                   │  PostgreSQL  │
+                                                   │   Database   │
+                                                   └──────────────┘
 ```
 
-1. **Frontend (React + Vite + TS)**: A premium dashboard with a responsive multi-camera layout, camera control switches, and real-time security alert cards.
-2. **Backend (Bun + Hono + TS)**: Manages authentication (JWT), camera configurations, alerts persistence, and WebSocket client connections.
-3. **Worker (FastAPI + OpenCV + YOLOv8 + aiortc)**: Ingests RTSP streams, executes YOLOv8 object detection, encodes frames, and streams WebRTC feeds directly to authorized client browsers.
-4. **MediaMTX (RTSP Simulator)**: Loops a test video file inside Docker to simulate real security cameras without requiring external hardware.
+1. **Frontend (React + Vite + TS)**: A responsive dashboard featuring grid views for live cameras, real-time alert logs, custom status overlays, and complete CRUD control over RTSP cameras.
+2. **Backend (Bun + Hono + TS)**: Handles JWT-based authentication, camera configurations, alert history persistence, WebSocket client coordination, and subscribes to the Redis Pub/Sub MQ.
+3. **Worker (FastAPI + OpenCV + YOLOv8 + aiortc)**: Ingests RTSP streams, executes YOLOv8 object detection, mirror-flips frames, overlays OpenCV green bounding boxes, and streams H.264 video tracks over WebRTC directly to client browsers.
+4. **Redis (Message Queue)**: Decouples detection events from the HTTP pipeline, ensuring high-throughput ingestion and buffering.
+5. **MediaMTX (RTSP Simulator)**: Loops a test video file inside Docker to simulate IP security cameras.
 
 ---
 
-## ⚡ Tech Stack Details & Decisions
+## 💾 Unified Event Format
 
-### 1. WebRTC for Live Streaming
-* **aiortc (Python)** & **Pion (specification)**: Standard H.264 video track packetization ensures sub-second latency compared to HLS/DASH.
-* **Non-Trickle ICE**: Both sides wait for candidate gathering to finish before completing the SDP handshake, simplifying signaling logic across container network boundaries.
+This JSON event payload format is preserved identically across the Python worker, Redis Pub/Sub, Postgres database, and the frontend WebSocket updates:
 
-### 2. AI Person Detection
-* **YOLOv8n (Nano)**: The smallest variant of YOLOv8 is used to keep inference under 150ms on standard CPUs.
-* **Frame Skipping**: Detection runs every 10th frame (`DETECT_EVERY_N_FRAMES=10`) to optimize CPU usage while maintaining frame buffer reading.
+```json
+{
+  "event_id": "0aeb9a21-8afd-4f91-8c21-65c3d37a5bc7",
+  "camera_id": "b49a71ff-1219-46f1-883e-c38dc621fa03",
+  "event_type": "person_detected",
+  "timestamp": "2026-06-27T13:00:00.123Z",
+  "confidence": 0.95,
+  "bounding_box": {
+    "x": 120,
+    "y": 80,
+    "width": 60,
+    "height": 180
+  },
+  "frame_number": 4821,
+  "thumbnail_url": null
+}
+```
 
-### 3. Backend & Database
-* **Bun**: Used for fast execution times and built-in SQLite/PostgreSQL drivers.
-* **PostgreSQL**: Selected for ACID compliant transactional storage of alert histories and configurations.
+* `event_id`: Unique UUID generated by the worker to enforce backend-side database deduplication.
+* `bounding_box`: Normalised relative coordinates `{x, y, width, height}` of the detected person.
+* `thumbnail_url`: Future extension for saving frame crops to cloud storage (e.g. AWS S3).
 
 ---
 
-## 🚀 How to Run the System
+## ⚡ Tech Stack & Design Decisions
+
+### 1. WebRTC Live Streaming
+* **aiortc (Python)**: Standard H.264 video track packetization ensures sub-second latency compared to HLS/DASH.
+* **Non-Trickle ICE**: Both sides wait for candidate gathering to complete before the SDP handshake, simplifying signaling across isolated network bridges.
+
+### 2. AI Person Detection & Worker Language
+* **YOLOv8n (Nano)**: The smallest variant of YOLOv8 is selected for CPU inference, executing in ~100-150ms.
+* **Frame Skipping**: Inference is run every 10th frame (`DETECT_EVERY_N_FRAMES=10`) to prevent CPU exhaustion while keeping the input buffer clear.
+* **Python vs. Go**: Python was chosen for the worker to leverage the native, optimized `ultralytics` package and `aiortc` binding, avoiding complex CGo configurations.
+* **OpenCV Drawing**: Annotations are drawn directly on frames in memory on the worker. This guarantees absolute synchronization and avoids double-border overlays in React.
+
+### 3. Decoupling & Queueing (Redis Pub/Sub)
+* When YOLOv8 finds a person, it publishes the event to Redis channel `sentinel:alerts`.
+* The backend subscribes to this channel. If Redis goes offline, the worker transparently falls back to direct HTTP POST alerts.
+
+### 4. Deduplication & Rate Limiting
+* **Worker Cooldown**: The worker maintains an in-memory rate-limiter, ensuring it only broadcasts one alert per camera every `COOLDOWN_SECONDS` (default: 15s).
+* **DB-Level Deduplication**: The `alerts` table has a `UNIQUE` constraint on the `event_id` column. The backend executes `ON CONFLICT (event_id) DO NOTHING` during insertion. Duplicate posts resolve to `200 OK` with `{ skipped: true }` instead of raising exceptions.
+
+---
+
+## 🚀 How to Run
 
 ### Prerequisites
-* [Docker Desktop](https://www.docker.com/products/docker-desktop/) (ensure it is running)
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/) (must be running)
+* [FFmpeg](https://ffmpeg.org/) (optional, for streaming local webcam)
 
-### Running the Stack
-1. Clone the repository and navigate to the project root.
-2. Build and start the services:
+### Run the Docker Services
+1. Build and launch all containers in the background:
    ```bash
-   docker compose up --build
+   docker compose up -d --build
    ```
-3. Open your browser and navigate to:
+   *(Subsequent starts can omit `--build` and start instantly using `docker compose up -d`).*
+2. Open your browser and navigate to:
    ```
    http://localhost:5173
    ```
+3. Sign up an account and log in.
 
-### Quick Verification Steps
-1. **Create Account**: Go to the "Create Account" tab, enter credentials, and log in.
-2. **Register Camera**: Go to the **Camera Manager** page and click **Register Camera**:
-   * **Name**: `Main Warehouse Gate`
-   * **RTSP URL**: `rtsp://mediamtx:8554/test`
-3. **View Dashboard**: Return to the **Dashboard** page, locate the camera, and click **▶️ Live Feed**. The player will negotiate a connection and play the live video.
+### Run Local Webcam Stream (macOS / Host)
+If you want to stream your own webcam as a live RTSP stream:
+1. Stop the worker container (so we can run the worker on the host to access camera devices):
+   ```bash
+   docker stop sentinel_worker
+   ```
+2. Launch the worker locally:
+   ```bash
+   cd worker
+   .venv/bin/uvicorn main:app --host 0.0.0.0 --port 8001
+   ```
+3. Publish your webcam stream to MediaMTX using `ffmpeg` (in a separate shell):
+   ```bash
+   ffmpeg -f avfoundation -framerate 30 -video_size 640x480 -i "0" \
+     -pix_fmt yuv420p -vf "format=yuv420p" \
+     -c:v libx264 -preset ultrafast -tune zerolatency \
+     -f rtsp rtsp://localhost:8554/webcam
+   ```
+4. Register the camera in **Camera Manager** with the RTSP URL `rtsp://localhost:8554/webcam`, go back to the **Dashboard**, and click **▶️ Live Feed**!
 
 ---
 
-## 🔒 Security Measures
-* **Centralized Auth**: All endpoints on the backend require a validated JSON Web Token (JWT) in the `Authorization` header.
-* **Worker Isolation**: The Python worker resides behind the backend proxy, requiring a shared `WORKER_SECRET` header for backend-to-worker communication.
-* **mDNS WebRTC Resolution**: On macOS, Docker VM bridge routing cannot resolve browser-side `.local` mDNS candidates. Ensure **"Anonymize local IPs exposed by WebRTC"** is disabled in `chrome://flags` to allow local loopback connection during testing.
+## 🧪 Unit Tests
+The Hono backend API endpoints are tested using Bun's built-in fast test runner, with mocked database queries and JWT assertions.
+Run the tests:
+```bash
+cd backend
+bun run test
+```
+
+---
+
+## ☸️ Kubernetes Deployment
+Production-grade deployment configuration files are structured under `infra/k8s/`:
+* `namespace.yaml`: Dedicated `sentinelstream` namespace.
+* `postgres.yaml`: Configures Secrets, PersistentVolumeClaim, Deployment, and Service.
+* `redis.yaml`: Redis cache deployment and service.
+* `mediamtx.yaml`: NodePorts to ingest/stream media.
+* `backend.yaml` / `worker.yaml`: API and worker cluster setup.
+
+---
+
+## 🔮 Future Improvements
+1. **TURN Server Setup**: Add a CoTURN container for WebRTC streaming outside local area networks.
+2. **GPU Acceleration**: Deploy YOLOv8 onto CUDA/TensorRT runtime environments to process 30+ concurrent cameras at full frame rate.
+3. **Cloud Storage**: Save event thumbnails to Amazon S3 buckets.
+4. **Horizontal Pod Autoscaling (HPA)**: Configure K8s HPA to scale worker pods dynamically based on CPU/GPU utilization spikes.

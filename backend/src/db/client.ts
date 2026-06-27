@@ -30,6 +30,10 @@ export async function checkDbConnection() {
   try {
     await sql`SELECT 1`;
     console.log("✅ Database connected");
+    // Auto-migration for event_id column
+    await sql`ALTER TABLE alerts ADD COLUMN IF NOT EXISTS event_id UUID UNIQUE`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_alerts_event_id ON alerts(event_id)`;
+    console.log("✅ Database schema auto-migration complete");
   } catch (err) {
     console.error("❌ Database connection failed:", err);
     process.exit(1);

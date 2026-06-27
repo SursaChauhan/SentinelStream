@@ -8,18 +8,16 @@ import type { AppEnv } from "../types";
 
 const alerts = new Hono<AppEnv>();
 
-// ─── POST /api/alerts ─── Worker posts a detection event ───────────────────
-alerts.post("/", workerAuthMiddleware, async (c) => {
-  const body = await c.req.json().catch(() => null);
-
+// Helper to save and broadcast an alert, used by HTTP route and Redis subscriber
+export async function saveAndBroadcastAlert(body: any) {
   if (!body?.camera_id || !body?.confidence || !body?.timestamp) {
-    return c.json({ error: "camera_id, confidence, and timestamp are required" }, 400);
+    throw new Error("camera_id, confidence, and timestamp are required");
   }
 
   const [alert] = await sql`
     INSERT INTO alerts (
       camera_id, event_type, timestamp, confidence,
-      bounding_box, frame_number, thumbnail_url, raw_payload
+      bounding_box, frame_number, thumbnail_url, raw_payload, event_id
     )
     VALUES (
       ${body.camera_id},
@@ -29,15 +27,38 @@ alerts.post("/", workerAuthMiddleware, async (c) => {
       ${JSON.stringify(body.bounding_box ?? {})}::jsonb,
       ${body.frame_number ?? null},
       ${body.thumbnail_url ?? null},
-      ${JSON.stringify(body)}::jsonb
+      ${JSON.stringify(body)}::jsonb,
+      ${body.event_id ?? null}
     )
+    ON CONFLICT (event_id) DO NOTHING
     RETURNING *
   `;
 
-  // Push real-time to all connected browser WebSocket clients
-  wsHub.broadcast({ type: "alert", payload: alert });
+  if (alert) {
+    // Push real-time to all connected browser WebSocket clients
+    wsHub.broadcast({ type: "alert", payload: alert });
+  }
 
-  return c.json({ alert }, 201);
+  return alert;
+}
+
+// ─── POST /api/alerts ─── Worker posts a detection event ───────────────────
+alerts.post("/", workerAuthMiddleware, async (c) => {
+  const body = await c.req.json().catch(() => null);
+
+  if (!body?.camera_id || !body?.confidence || !body?.timestamp) {
+    return c.json({ error: "camera_id, confidence, and timestamp are required" }, 400);
+  }
+
+  try {
+    const alert = await saveAndBroadcastAlert(body);
+    if (!alert) {
+      return c.json({ alert: null, message: "Duplicate alert, skipped", skipped: true }, 200);
+    }
+    return c.json({ alert }, 201);
+  } catch (err: any) {
+    return c.json({ error: err.message || "Failed to process alert" }, 500);
+  }
 });
 
 // ─── GET /api/alerts ─── Frontend fetches alerts with filters ──────────────

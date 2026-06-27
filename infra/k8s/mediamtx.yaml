@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mediamtx
+  namespace: sentinelstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mediamtx
+  template:
+    metadata:
+      labels:
+        app: mediamtx
+    spec:
+      containers:
+        - name: mediamtx
+          image: bluenviron/mediamtx:latest-ffmpeg
+          ports:
+            - containerPort: 8554
+            - containerPort: 8888
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mediamtx
+  namespace: sentinelstream
+spec:
+  type: NodePort
+  ports:
+    - name: rtsp
+      port: 8554
+      targetPort: 8554
+      nodePort: 30554
+    - name: hls
+      port: 8888
+      targetPort: 8888
+      nodePort: 30888
+  selector:
+    app: mediamtx

@@ -22,3 +22,5 @@ aiohttp>=3.11.10
 numpy>=1.26.4
 av>=14.0.0
 python-multipart==0.0.20
+redis>=5.0.0
+

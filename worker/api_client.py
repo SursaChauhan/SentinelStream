@@ -11,6 +11,7 @@
 #   Simple rate limit: only post one alert per camera every COOLDOWN_SECONDS.
 #   Alert deduplication (by event_id) is also handled by the API.
 
+import json
 import logging
 import os
 import time
@@ -18,6 +19,7 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
+import redis.asyncio as aioredis
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,8 @@ COOLDOWN_SECONDS = float(os.getenv("ALERT_COOLDOWN_SECONDS", "15"))
 
 class ApiClient:
     """
-    Async HTTP client for posting detection events to the backend.
+    Async client for posting detection events to the backend.
+    Supports publishing to Redis Pub/Sub MQ with a fallback to direct HTTP POST.
 
     Usage:
         client = ApiClient()
@@ -58,6 +61,22 @@ class ApiClient:
             timeout=5.0,
         )
 
+        # Redis configuration (MQ)
+        self.redis_url = os.getenv("REDIS_URL")
+        self._redis = None
+
+        if self.redis_url:
+            # If running on host, replace 'redis' container name with 'localhost' in REDIS_URL
+            # (since Docker exposes Redis port 6379 to the host).
+            if "redis:6379" in self.redis_url and not os.path.exists("/.dockerenv"):
+                self.redis_url = self.redis_url.replace("redis:6379", "localhost:6379")
+            
+            try:
+                self._redis = aioredis.from_url(self.redis_url)
+                logger.info(f"🔌 Redis MQ configured at {self.redis_url}")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Redis client: {e}")
+
     async def post_alert(
         self,
         camera_id: str,
@@ -67,7 +86,8 @@ class ApiClient:
         event_type: str = "person_detected",
     ) -> bool:
         """
-        Post a detection alert to the backend API.
+        Post a detection alert to the backend.
+        Publishes to Redis MQ if available, otherwise falls back to direct HTTP POST.
 
         Returns True if the alert was sent, False if skipped (cooldown).
         """
@@ -94,12 +114,27 @@ class ApiClient:
             "thumbnail_url": None,                 # Future: save frame crop to S3
         }
 
+        # --- Publish to Redis MQ (if enabled) ---
+        if self._redis:
+            try:
+                # Test connection / ping to check if Redis is actually up
+                await self._redis.ping()
+                await self._redis.publish("sentinel:alerts", json.dumps(payload))
+                logger.info(
+                    f"Alert published to Redis MQ: camera={camera_id} "
+                    f"conf={confidence:.2f} frame={frame_number} event_id={payload['event_id']}"
+                )
+                return True
+            except Exception as e:
+                logger.warning(f"⚠️ Redis Pub/Sub failed, falling back to HTTP POST: {e}")
+
+        # --- Fallback: POST to HTTP API ---
         try:
             response = await self._http.post("/api/alerts", json=payload)
-            if response.status_code == 201:
+            if response.status_code in (200, 201):
                 logger.info(
-                    f"Alert posted: camera={camera_id} "
-                    f"conf={confidence:.2f} frame={frame_number}"
+                    f"Alert posted (HTTP): camera={camera_id} "
+                    f"conf={confidence:.2f} frame={frame_number} response={response.status_code}"
                 )
                 return True
             else:
@@ -113,8 +148,10 @@ class ApiClient:
             return False
 
     async def close(self):
-        """Close the HTTP client (call on shutdown)."""
+        """Close clients on shutdown."""
         await self._http.aclose()
+        if self._redis:
+            await self._redis.close()
 
 
 # Singleton instance — shared across all camera streams

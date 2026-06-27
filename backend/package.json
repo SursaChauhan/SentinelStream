@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev":   "bun run --watch src/index.ts",
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "test":  "DATABASE_URL=postgres://dummy:dummy@localhost:5432/dummy JWT_SECRET=dummy bun test"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
@@ -19,6 +20,7 @@
     "bcryptjs": "^3.0.3",
     "hono": "^4.12.27",
     "jose": "^6.2.3",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "redis": "^4.7.0"
   }
 }
