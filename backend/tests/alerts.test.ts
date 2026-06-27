@@ -38,7 +38,7 @@ describe("SentinelStream Backend Routes Tests", () => {
     test("should return status ok", async () => {
       const res = await app.request("/health");
       expect(res.status).toBe(200);
-      const json = await res.json();
+      const json = (await res.json()) as any;
       expect(json).toEqual({ status: "ok", service: "sentinel-backend" });
     });
   });
@@ -61,7 +61,7 @@ describe("SentinelStream Backend Routes Tests", () => {
         body: JSON.stringify(validAlertPayload),
       });
       expect(res.status).toBe(401);
-      const json = await res.json();
+      const json = (await res.json()) as any;
       expect(json).toEqual({ error: "Unauthorized" });
     });
 
@@ -94,7 +94,7 @@ describe("SentinelStream Backend Routes Tests", () => {
       });
 
       expect(res.status).toBe(201);
-      const json = await res.json();
+      const json = (await res.json()) as any;
       expect(json.alert).toBeDefined();
       expect(json.alert.id).toBe("alert-999");
     });
@@ -113,7 +113,7 @@ describe("SentinelStream Backend Routes Tests", () => {
       });
 
       expect(res.status).toBe(200);
-      const json = await res.json();
+      const json = (await res.json()) as any;
       expect(json.skipped).toBe(true);
       expect(json.alert).toBeNull();
       expect(json.message).toContain("Duplicate alert");
@@ -151,7 +151,7 @@ describe("SentinelStream Backend Routes Tests", () => {
       });
 
       expect(res.status).toBe(200);
-      const json = await res.json();
+      const json = (await res.json()) as any;
       expect(json.alerts).toBeDefined();
       expect(json.alerts.length).toBe(2);
       expect(json.pagination).toBeDefined();

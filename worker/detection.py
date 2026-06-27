@@ -38,7 +38,7 @@ def get_model():
         logger.info("Loading YOLOv8n model...")
         # Downloads yolov8n.pt (~6MB) to ~/.cache/ultralytics/ on first run
         _model = YOLO("yolov8n.pt")
-        logger.info("YOLOv8n model loaded ✅")
+        logger.info("YOLOv8n model loaded")
     return _model
 
 

@@ -61,8 +61,8 @@ async function main() {
     },
   });
 
-  console.log(`🚀 SentinelStream backend running on port ${PORT}`);
-  console.log(`📡 WebSocket: ws://localhost:${PORT}/ws?token=<jwt>`);
+  console.log(`SentinelStream backend running on port ${PORT}`);
+  console.log(`WebSocket: ws://localhost:${PORT}/ws?token=<jwt>`);
 }
 
 main();

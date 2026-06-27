@@ -73,9 +73,9 @@ class ApiClient:
             
             try:
                 self._redis = aioredis.from_url(self.redis_url)
-                logger.info(f"🔌 Redis MQ configured at {self.redis_url}")
+                logger.info(f"Redis MQ configured at {self.redis_url}")
             except Exception as e:
-                logger.error(f"❌ Failed to initialize Redis client: {e}")
+                logger.error(f"Failed to initialize Redis client: {e}")
 
     async def post_alert(
         self,
@@ -126,7 +126,7 @@ class ApiClient:
                 )
                 return True
             except Exception as e:
-                logger.warning(f"⚠️ Redis Pub/Sub failed, falling back to HTTP POST: {e}")
+                logger.warning(f"Redis Pub/Sub failed, falling back to HTTP POST: {e}")
 
         # --- Fallback: POST to HTTP API ---
         try:

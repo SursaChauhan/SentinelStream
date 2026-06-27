@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
     from detection import get_model
     get_model()
 
-    logger.info("🚀 Worker started and ready")
+    logger.info("Worker started and ready")
 
     yield  # Application runs here
 

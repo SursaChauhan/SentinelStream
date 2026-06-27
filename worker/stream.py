@@ -169,7 +169,7 @@ class CameraStream:
 
             self.stats.state = StreamState.LIVE
             self.stats.error = None
-            logger.info(f"Camera {self.camera_id} is LIVE ✅")
+            logger.info(f"Camera {self.camera_id} is LIVE")
 
             # --- Frame loop ---
             while not self._stop_event.is_set():
