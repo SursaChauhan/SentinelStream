@@ -29,6 +29,8 @@ services:
     env_file: .env
     ports:
       - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,12 +45,9 @@ services:
       dockerfile: Dockerfile
     container_name: sentinel_worker
     env_file: .env
-    ports:
-      - "8001:8001"
+    network_mode: host
     depends_on:
       - backend
-    # network_mode: host   ← uncomment if WebRTC ICE fails in Docker
-    #                         (needed for local WebRTC peer discovery)
 
   # ─── React Frontend ───────────────────────────────────────────────────
   frontend:
