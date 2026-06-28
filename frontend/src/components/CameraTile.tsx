@@ -182,6 +182,14 @@ export default function CameraTile({
             >
               ⏹️ Stop Stream
             </button>
+          ) : status === "connecting" ? (
+            <button
+              className="btn btn-primary"
+              style={{ padding: "6px 12px", fontSize: "12px", opacity: 0.7, cursor: "not-allowed" }}
+              disabled={true}
+            >
+              🔄 Connecting...
+            </button>
           ) : (
             <button
               onClick={handleStart}
